@@ -1,4 +1,4 @@
-# Marup Tools
+# Markup Tools
 
 ## AtomicML - The Atomic Markup Language
 
