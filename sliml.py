@@ -2,468 +2,417 @@
 sliml.py - new SliML parser for Python
 
 usage:
-  import sliml
-  # 0 is start state that expects title
-  html = sliml.SliML().getHtml(0, slimlData)
+    import sliml
+    # 0 is start state that expects title
+    html = sliml.SliML().getHtml(0, slimlData)
 
 author: Neill A. Kipp
 created: March 15, 2004
 modified: April 6, 2004 - NK - now shows trailing single line
 modified: Sept 15, 2005 - NK - now allows *bulletline
 modified: June 20, 2005 - NK - fixed missing first indented line bug
-
-The SliML Document Formatter, Copyright 1995-2004, Neill A. Kipp.
-Permission is granted to use and modify this program without
-restriction, as long as the copyright notice and this permission
-notice are included in all copies and modifications. This software is
-provided "as is," without warranty of any kind, and Neill A. Kipp will
-not be liable for any claim, damages, or liability in connection with
-the use or modification of this software.
-
-See http://sliml.kippsoftware.com/ for license information.
+modified: Sept 22, 2023 - NK - refactor and upgrade to python3
 
 """
 
-# Twelve tokens
-tokens = """\
-blank     \s*$
-break     //
-subhead   \+
-table     --
-colStart  <col
-colEnd    </col
-preStart  <pre
-preEnd    </pre
-comment   #
-item      \s*[\*\-]
-indent    \s+
-line      .?""".split("\n")
-
-# Eleven states
-# 0 title
-# 1 body
-# 2 hold
-# 3 para
-# 4 indent
-# 5 list 
-# 6 tableHead
-# 7 table
-# 8 columnHead
-# 9 pre
-# 10 slideHead
-
-grammar = """\
-0 blank ignore 0
-0 break ignore 0
-0 colEnd ignore 0
-0 colStart startColumn 8
-0 comment comment 0
-0 indent title 1
-0 item title 1
-0 line title 1
-0 preEnd ignore 0
-0 preStart startPre 9
-0 subhead title 1
-0 table startTable 6
-1 blank ignore 1
-1 break ignore 10
-1 colEnd endColumns 1
-1 colStart startColumn 8
-1 comment comment 1
-1 indent startIndent indent 4
-1 item startList 5
-1 line hold 2
-1 preEnd ignore 1
-1 preStart startPre 9
-1 subhead subhead 1 
-1 table startTable 6
-2 blank startPara endPara 1
-2 break startPara endPara 10
-2 colEnd startPara endPara endColumns 1
-2 colStart startPara endPara startColumn 8
-2 comment comment 2
-2 indent startIndent holdIndent indent 4
-2 item startPara endPara startList 5
-2 line startPara paraLine 3
-2 preEnd ignore 2
-2 preStart startPara endPara startPre 9
-2 subhead startPara endPara subhead 1
-2 table startPara endPara startTable 6
-3 blank endPara 1
-3 break endPara 10
-3 colEnd endPara endColumns 1
-3 colStart endPara startColumn 8
-3 comment comment 3
-3 indent endPara hold 2
-3 item endPara startList 5
-3 line paraLine 3
-3 preEnd ignore 3
-3 preStart endPara startPre 9
-3 subhead endPara subhead 1
-3 table endPara startTable 6
-4 blank endIndent 1
-4 break endIndent 10
-4 colEnd endIndent endColumns 1
-4 colStart endIndent startColumn 8
-4 comment comment 4
-4 indent indent 4
-4 item indent 4
-4 line endIndent hold 2
-4 preEnd ignore 4
-4 preStart endIndent startPre 9
-4 subhead endIndent subhead 1
-4 table endIndent startTable 6
-5 blank endList 1
-5 break endList 10
-5 colEnd endList endColumns 1
-5 colStart endList startColumn 8
-5 comment comment 5
-5 indent continueItem 5
-5 item item 5
-5 line endList hold 2
-5 preEnd ignore 5
-5 preStart endList startPre 9
-5 subhead endList subhead 1
-5 table endList startTable 6
-6 blank ignore 7
-6 break endTable 10
-6 colEnd endTable endColumns 1
-6 colStart endTable startColumn 8
-6 comment comment 6
-6 indent tableHead 7
-6 item tableHead 7
-6 line tableHead 7
-6 preEnd ignore 7
-6 preStart endTable startPre 9
-6 subhead tableHead 7
-6 table endTable 1
-7 blank blankRow 7
-7 break endTable 10
-7 colEnd endTable endColumns 1
-7 colStart endTable startColumn 8
-7 comment comment 7
-7 indent tableRow 7
-7 item tableRow 7
-7 line tableRow 7
-7 preEnd ignore 7
-7 preStart endTable startPre 9
-7 subhead tableRow 7
-7 table endTable 1
-8 blank ignore 1
-8 break endColumns 10
-8 colEnd endColumns 1
-8 colStart startColumn 8
-8 comment comment 8
-8 indent columnHead 1
-8 item startList 5
-8 line columnHead 1
-8 preEnd ignore 1
-8 preStart startPre 9
-8 subhead subhead 1
-8 table startTable 6
-9 blank preLine 9
-9 break preLine 9
-9 colEnd preLine 9
-9 colStart preLine 9
-9 comment preLine 9
-9 indent preLine 9
-9 item preLine 9
-9 line preLine 9
-9 preEnd endPre 1
-9 preStart preLine 9
-9 subhead preLine 9
-9 table preLine 9
-10 blank emptySlideHead 1
-10 break emptySlideHead 10
-10 colEnd ignore 1
-10 colStart emptySlideHead 8
-10 comment comment 10
-10 indent slideHead 1
-10 item emptySlideHead startList 5
-10 line slideHead 1
-10 preEnd emptySlideHead 1
-10 preStart emptySlideHead 9
-10 subhead subhead 1
-10 table emptySlideHead 6
-""".split("\n")
-
 import re
+import io
+import atomicml
 
-class SliML :
-  def __init__ (self) :
-    out = []
-    self.patterns = []
-    self.names = []
-    for token in tokens :
-      (name, pattern) = token.split()
-      self.patterns.append(re.compile(pattern))
-      self.names.append(name)
-    self.INDENT = re.compile(r"([\t ]*)(.*)")
-    self.CELL = re.compile(r"\t|(?:  +)")
-    self.funcs = {}
-    self.goto = {}
-    for line in grammar :
-      if not line.strip() :
-        continue
-      fields = line.split()
-      state = fields.pop(0)
-      see = fields.pop(0)
-      goto = fields.pop(-1)
-      self.funcs["%s %s" % (state, see)] = ' '.join(fields)
-      self.goto["%s %s" % (state, see)] = goto
-    self.inColumns = 0
-    self.holdLine = ""
-    self.state = 0
 
-  def __str__(self) :
-    out = []
-    out.append("patterns")
-    for pattern in self.patterns :
-      out.append("  %s" % pattern.pattern)
-    out.append("states")
-    for whichState in range(11) :
-      for whichToken in self.names :
-        whichFunc = self.funcs["%s %s" % (whichState, whichToken)]
-        whichGoto = self.goto["%s %s" % (whichState, whichToken)]
-        out.append("  %s %s %s %s" % (whichState, whichToken, whichFunc or "None", whichGoto))
-    return '\n'.join(out)
+class Token:
+    def __init__(self, name, pattern):
+        self.name = name
+        self.pattern = pattern
 
-  def setState(self, state) :
-    self.state = state
-    return self
+    def __str__(self):
+        return f"{self.name} {self.pattern}"
 
-  def getHtml(self, state, data) :
-    self.setState(state)
-    return self.parse(data)
 
-  def parse(self, data) :
-    state = self.state
-    self.out = []
-    self.stack = [-1]
-    for line in data.split('\n') :
-      whichPattern = 0
-      for pattern in self.patterns :
-        if pattern.match(line) :
-          token = self.names[whichPattern]
-          goto = self.goto["%s %s" % (state, token)]
-          for func in self.funcs["%s %s" % (state, token)].split() :
-            eval("self.%s(line)" % func)
-          state = self.goto["%s %s" % (state, token)]
-          break
-        whichPattern += 1
-    if self.holdLine :
-      self.startPara("")
-    return "".join(self.out)
+class Action:
+    def __init__(self, see, funcs, goto):
+        self.see = see
+        self.funcs = funcs
+        self.goto = goto
 
-  def ignore(self, line) :
-    self.out.append("")
+    def __str__(self):
+        return f"{self.see} {' '.join(self.funcs)} {self.goto}"
 
-  MDASH = re.compile(r"--")
-  LDQUOT = re.compile(r'"(?=\w)');
-  RDQUOT = re.compile(r'"');
-  LQUOT = re.compile(r"`");
-  RQUOT = re.compile(r"'");
 
-  def cook(self, line) :
-    line = self.MDASH.sub("&mdash;", line)
-    line = self.LDQUOT.sub("&ldquo;", line)
-    line = self.RDQUOT.sub("&rdquo;", line)
-    line = self.LQUOT.sub("&lsquo;", line)
-    line = self.RQUOT.sub("&rsquo;", line)
-    return line
+class State:
+    def __init__(self, name):
+        self.name = name
+        self.actions = {}
 
-  def title(self, line) :
-    self.out.append('<h1>%s</h1>\n<div>\n' % line)
+    def __str__(self):
+        out = [f"state {self.name}"]
+        for action in self.actions.values():
+            out.append(str(action))
+        return "\n  ".join(out)
 
-  def hold(self, line) :
-    self.holdLine = line
 
-  def startPara(self, line) :
-    self.out.append('<p>%s\n' % self.cook(self.holdLine))
-    self.holdLine = ""
+class SliML(atomicml.AtomicStyle):
+    grammar = r"""
+tokens
+  blank     \s*$
+  break     //
+  subhead   \+
+  table     --
+  colStart  <col
+  colEnd    </col
+  preStart  <pre
+  preEnd    </pre
+  comment   #
+  item      \s*[\*\-]
+  indent    \s+
+  line      .?
+state start
+  blank ignore start
+  break ignore start
+  colEnd ignore start
+  colStart startColumn columnHead
+  comment comment start
+  indent title body
+  item title body
+  line title body
+  preEnd ignore start
+  preStart startPre pre
+  subhead title body
+  table startTable tableHead
+state body
+  blank ignore body
+  break ignore slideHead
+  colEnd endColumns body
+  colStart startColumn columnHead
+  comment comment body
+  indent startIndent indent indent
+  item startList list
+  line hold hold
+  preEnd ignore body
+  preStart startPre pre
+  subhead subhead body
+  table startTable tableHead
+state hold
+  blank startPara endPara body
+  break startPara endPara slideHead
+  colEnd startPara endPara endColumns body
+  colStart startPara endPara startColumn columnHead
+  comment comment hold
+  indent startIndent holdIndent indent indent
+  item startPara endPara startList list
+  line startPara paraLine para
+  preEnd ignore hold
+  preStart startPara endPara startPre pre
+  subhead startPara endPara subhead body
+  table startPara endPara startTable tableHead
+state para
+  blank endPara body
+  break endPara slideHead
+  colEnd endPara endColumns body
+  colStart endPara startColumn columnHead
+  comment comment para
+  indent endPara hold hold
+  item endPara startList list
+  line paraLine para
+  preEnd ignore para
+  preStart endPara startPre pre
+  subhead endPara subhead body
+  table endPara startTable tableHead
+state indent
+  blank endIndent body
+  break endIndent slideHead
+  colEnd endIndent endColumns body
+  colStart endIndent startColumn columnHead
+  comment comment indent
+  indent indent indent
+  item indent indent
+  line endIndent hold hold
+  preEnd ignore indent
+  preStart endIndent startPre pre
+  subhead endIndent subhead body
+  table endIndent startTable tableHead
+state list
+  blank endList body
+  break endList slideHead
+  colEnd endList endColumns body
+  colStart endList startColumn columnHead
+  comment comment list
+  indent continueItem list
+  item item list
+  line endList hold hold
+  preEnd ignore list
+  preStart endList startPre pre
+  subhead endList subhead body
+  table endList startTable tableHead
+state tableHead
+  blank ignore table
+  break endTable slideHead
+  colEnd endTable endColumns body
+  colStart endTable startColumn columnHead
+  comment comment tableHead
+  indent tableHead table
+  item tableHead table
+  line tableHead table
+  preEnd ignore table
+  preStart endTable startPre pre
+  subhead tableHead table
+  table endTable body
+state table
+  blank blankRow table
+  break endTable slideHead
+  colEnd endTable endColumns body
+  colStart endTable startColumn columnHead
+  comment comment table
+  indent tableRow table
+  item tableRow table
+  line tableRow table
+  preEnd ignore table
+  preStart endTable startPre pre
+  subhead tableRow table
+  table endTable body
+state columnHead
+  blank ignore body
+  break endColumns slideHead
+  colEnd endColumns body
+  colStart startColumn columnHead
+  comment comment columnHead
+  indent columnHead body
+  item startList list
+  line columnHead body
+  preEnd ignore body
+  preStart startPre pre
+  subhead subhead body
+  table startTable tableHead
+state pre
+  blank preLine pre
+  break preLine pre
+  colEnd preLine pre
+  colStart preLine pre
+  comment preLine pre
+  indent preLine pre
+  item preLine pre
+  line preLine pre
+  preEnd endPre body
+  preStart preLine pre
+  subhead preLine pre
+  table preLine pre
+state slideHead
+  blank emptySlideHead body
+  break emptySlideHead slideHead
+  colEnd ignore body
+  colStart emptySlideHead columnHead
+  comment comment slideHead
+  indent slideHead body
+  item emptySlideHead startList list
+  line slideHead body
+  preEnd emptySlideHead body
+  preStart emptySlideHead pre
+  subhead subhead body
+  table emptySlideHead tableHead
+"""
 
-  def paraLine(self, line) :
-    self.out.append('%s\n' % self.cook(line))
+    def __init__(self):
+        super().__init__()
+        self.tokens = []
+        self.states = {}
+        self.style(atomicml.parse_nodes(self.grammar))
+        self.stack = []
+        self.inColumns = 0
+        self.holdLine = ""
 
-  def endPara(self, line) :
-    self.out.append('</p>\n\n')
+    def f_tokens(self, value, children, args, out):
+        for child in children:
+            token_name, pattern = self.name_value.match(child.data).groups()
+            self.tokens.append(Token(token_name, re.compile(pattern)))
 
-  def startList(self, line) :
-    indent, line = self.INDENT.match(line).groups()
-    indent = len(indent.expandtabs())
-    line = line[1:]
-    self.stack.append(indent)
-    self.out.append('<ul>\n')
-    self.out.append('<li>%s\n' % self.cook(line))
+    def f_state(self, value, children, args, out):
+        state_name = value.strip()
+        state = self.states[state_name] = State(state_name)
+        for child in children:
+            fields = child.data.split()
+            see = fields[0]
+            funcs = fields[1:-1]
+            goto = fields[-1]
+            state.actions[see] = Action(see, funcs, goto)
 
-  def item(self, line) :
-    indent, line = self.INDENT.match(line).groups()
-    indent = len(indent.expandtabs())
-    line = line[1:]
-    while (indent < self.stack[-1]) :
-      if (indent > self.stack[-2]) :
-        self.stack[-1] = indent
-      else :
-        del self.stack[-1]
-        self.out.append('</ul>\n')
-    if (indent == self.stack[-1]) :
-      self.out.append('<li>%s\n' % self.cook(line))
-    else :
-      self.stack.append(indent)
-      self.out.append('<ul>\n')
-      self.out.append('<li>%s\n' % self.cook(line))
+    def __str__(self):
+        out = ["tokens"]
+        for token in self.tokens:
+            out.append(f"  {token}")
+        for state in self.states.values():
+            out.append(str(state))
+        return "\n".join(out)
 
-  def continueItem(self, line) :
-    self.out.append('%s\n' % self.cook(line))
+    def parse(self, source, out):
+        source = io.StringIO(source) if isinstance(source, str) else source
+        self.stack = [-1]
+        state = self.states["start"]
+        for line in source:
+            for token in self.tokens:
+                if token.pattern.match(line):
+                    action = state.actions[token.name]
+                    for func in action.funcs:
+                        getattr(self, func)(line.rstrip(), out)
+                    state = self.states[action.goto]
+                    break
+        if self.holdLine:
+            self.startPara("", out)
 
-  def endList(self, line) :
-    while (self.stack[-1] > -1) :
-      self.out.append('</ul>\n')
-      del self.stack[-1]
-    self.out.append('\n')
+    def ignore(self, line, out):
+        pass
 
-  def startIndent(self, line) :
-    self.out.append('<pre>\n')
+    def title(self, line, out):
+        out.append(f"<h1>{self.cook(line)}</h1>\n<div>")
 
-  def holdIndent(self, line) :
-    self.indent(self.holdLine)
-    self.holdLine = ""
+    def hold(self, line, out):
+        self.holdLine = line
 
-  def indent(self, line) :
-    indent, data = self.INDENT.match(line).groups()
-    indent = "&nbsp;" * len(indent.expandtabs())
-    self.out.append('%s%s\n' % (indent, data))
+    def startPara(self, line, out):
+        out.append(f"<p>{self.cook(self.holdLine)}")
+        self.holdLine = ""
 
-  def endIndent(self, line) :
-    self.out.append('</pre>\n\n')
+    def paraLine(self, line, out):
+        out.append(f"{self.cook(line)}")
 
-  def startTable(self, line) :
-    self.out.append('<table>\n')
-    x, line = line.split(None, 1)
-    for align in line :
-      if align == "l" : align = "left"
-      elif align == "c" : align = "center"
-      elif align == "r" : align = "right"
-      self.out.append('<col align="%s">\n' % align)
+    def endPara(self, line, out):
+        out.append("</p>")
 
-  def tableHead(self, line) :
-    self.out.append('<tr>')
-    for cell in self.CELL.split(line) :
-      self.out.append('<th>%s</th>' % cell)
-    self.out.append('</tr>\n')
+    INDENT = re.compile(r"([\t ]*)(.*)")
 
-  def tableRow(self, line) :
-    self.out.append('<tr>')
-    for cell in self.CELL.split(line) :
-      self.out.append('<td>%s</td>' % cell)
-    self.out.append('</tr>\n')
+    def startList(self, line, out):
+        indent, line = self.INDENT.match(line).groups()
+        indent = len(indent.expandtabs())
+        line = line[1:]
+        self.stack.append(indent)
+        out.append(f"<ul>\n<li>{self.cook(line)}")
 
-  def blankRow(self, line) :
-    self.out.append('<tr><td></td></tr>\n')
+    def item(self, line, out):
+        indent, line = self.INDENT.match(line).groups()
+        indent = len(indent.expandtabs())
+        line = line[1:]
+        while indent < self.stack[-1]:
+            if indent > self.stack[-2]:
+                self.stack[-1] = indent
+            else:
+                self.stack.pop()
+                out.append("</ul>")
+        if indent == self.stack[-1]:
+            out.append(f"<li>{self.cook(line)}")
+        else:
+            self.stack.append(indent)
+            out.append(f"<ul>\n<li>{self.cook(line)}")
 
-  def endTable(self, line) :
-    self.out.append('</table>\n\n')
+    def continueItem(self, line, out):
+        out.append(self.cook(line))
 
-  def startColumn(self, line) :
-    if (not self.inColumns) :
-      self.out.append('<table><tr><td>\n')
-      self.inColumns = 1
-    else :
-      self.out.append('</td><td>\n')
+    def endList(self, line, out):
+        while self.stack[-1] > -1:
+            out.append("</ul>")
+            self.stack.pop()
 
-  def columnHead(self, line) :
-    self.out.append('<div class="colhead">%s</div>\n' % line)
+    def startIndent(self, line, out):
+        out.append("<pre>")
 
-  def endColumns(self, line) :
-    self.out.append('</td></tr></table>\n\n')
-    self.inColumns = 0
+    def holdIndent(self, line, out):
+        self.indent(self.holdLine, out)
+        self.holdLine = ""
 
-  def startPre(self, line) :
-    self.out.append('<pre>\n')
+    def indent(self, line, out):
+        indent, data = self.INDENT.match(line).groups()
+        indent = "&nbsp;" * len(indent.expandtabs())
+        out.append(f"{indent}{data}")
 
-  def preLine(self, line) :
-    line = line.replace('&', '&amp;')
-    line = line.replace('<', '&lt;')
-    self.out.append('%s\n' % line)
+    def endIndent(self, line, out):
+        out.append("</pre>")
 
-  def endPre(self, line) :
-    self.out.append('</pre>\n\n')
+    def startTable(self, line, out):
+        out.append("<table>")
+        _, line = line.split(None, 1)
+        for align in line:
+            if align == "l":
+                align = "left"
+            elif align == "c":
+                align = "center"
+            elif align == "r":
+                align = "right"
+            out.append(f'<col align="{align}">')
 
-  def slideHead(self, line) :
-    self.out.append('<h2>%s</h2>\n\n' % line)
+    CELL = re.compile(r"\t|(?:  +)")
 
-  def emptySlideHead(self, line) :
-    self.out.append('<h1></h1>\n\n')
+    def tableHead(self, line, out):
+        out.append("<tr>")
+        for cell in self.CELL.split(line):
+            out.append(f"<th>{cell}</th>")
+        out.append("</tr>")
 
-  def subhead(self, line) :
-    self.out.append('<h3>%s</h3>\n\n' % line[1:].strip())
+    def tableRow(self, line, out):
+        out.append("<tr>")
+        for cell in self.CELL.split(line):
+            out.append(f"<td>{cell}</td>")
+        out.append("</tr>")
+
+    def blankRow(self, line, out):
+        out.append("<tr><td></td></tr>")
+
+    def endTable(self, line, out):
+        out.append("</table>")
+
+    def startColumn(self, line, out):
+        if not self.inColumns:
+            out.append("<table><tr><td>")
+            self.inColumns = 1
+        else:
+            out.append("</td><td>")
+
+    def columnHead(self, line, out):
+        out.append(f'<div class="colhead">{line}</div>')
+
+    def endColumns(self, line, out):
+        out.append("</td></tr></table>")
+        self.inColumns = 0
+
+    def startPre(self, line, out):
+        out.append("<pre>")
+
+    def preLine(self, line, out):
+        line = line.replace("&", "&amp;")
+        line = line.replace("<", "&lt;")
+        out.append(line)
+
+    def endPre(self, line, out):
+        out.append("</pre>")
+
+    def slideHead(self, line, out):
+        out.append(f"<h2>{line}</h2>")
+
+    def emptySlideHead(self, line, out):
+        out.append("<h1></h1>")
+
+    def subhead(self, line, out):
+        out.append(f"<h3>{line[1:]}</h3>")
+
+    MDASH = re.compile(r"--")
+    LDQUOT = re.compile(r'"(?=\w)')
+    RDQUOT = re.compile(r'"')
+    LQUOT = re.compile(r"`")
+    RQUOT = re.compile(r"'")
+
+    def cook(self, line):
+        line = self.MDASH.sub("&mdash;", line)
+        line = self.LDQUOT.sub("&ldquo;", line)
+        line = self.RDQUOT.sub("&rdquo;", line)
+        line = self.LQUOT.sub("&lsquo;", line)
+        line = self.RQUOT.sub("&rsquo;", line)
+        return line
+
 
 # ////////////////////////////////////////////////////////////////
 
-if __name__ == '__main__' :
-  sliml = SliML()
-  # print sliml
-  sliml.setState(0)
-  test = sliml.parse("""\
-Head
+if __name__ == "__main__":
+    import sys
 
-Paragraph 1.
-This is still paragraph 1.
-Still P1.
-
-* Bullet1
-* Bullet2
-* Bullet3
-  - Bullet3-1
-    - Bullet 4-2
-  - Back one level
-- Back another level
-
--- lll
-table   table   table
-c   c   c 
---
-
-////////////////
-
-indent1
-  indent2
-    indent3
-
-para
-
-  already indent 1
-  already indent 2
-  already indent 3
-
-////////////////
-</pre>
-
-////////////////
-* HI
-////////////////
-
-////////////////
-Section
-
-more paragraphs1
-more paragraphs2
-more paragraphs3.
-
-+ Subhead
-
-<pre>Hi
-</pre>
-
-<col>
-H1
-column body1
-<col>
-H2
-column body2, first line
-column body2, last line.
-</col>
-""")
-
-  print sliml
-  print test
+    html = []
+    source = open(sys.argv[-1], encoding="utf-8")
+    SliML().parse(source, html)
+    for line in html:
+        print(line)

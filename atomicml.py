@@ -173,7 +173,7 @@ class AtomicStyle:
         self.map = {}
         self.pre = "f_"
 
-    def style(self, children, args, out):
+    def style(self, children, args = None, out = None):
         """Recur through children and style"""
         children = children if isinstance(children, list) else [children]
         for node in children:
