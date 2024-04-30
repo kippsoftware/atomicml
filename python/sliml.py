@@ -220,15 +220,15 @@ state slideHead
         self.inColumns = 0
         self.holdLine = ""
 
-    def f_tokens(self, value, children, args, out):
-        for child in children:
-            token_name, pattern = self.name_value.match(child.data).groups()
+    def f_tokens(self, node):
+        for child in node.children:
+            token_name, pattern = child.data.split(None, 1)
             self.tokens.append(Token(token_name, re.compile(pattern)))
 
-    def f_state(self, value, children, args, out):
-        state_name = value.strip()
+    def f_state(self, node):
+        state_name = node.data.split(None, 1)[1]
         state = self.states[state_name] = State(state_name)
-        for child in children:
+        for child in node.children:
             fields = child.data.split()
             see = fields[0]
             funcs = fields[1:-1]

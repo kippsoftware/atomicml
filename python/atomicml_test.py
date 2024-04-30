@@ -35,7 +35,7 @@ def test_tokenize():
 def test_parse_node():
     """Parse nodes"""
     source = "one\n  two\n\n  three\nfour"
-    nodes = [ node in parse_node(source) ]
+    nodes = [ node for node in parse_node(source) ]
     assert len(nodes) == 2
     assert nodes[0].data == "one"
     assert len(nodes[0].children) == 2
