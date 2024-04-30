@@ -66,12 +66,9 @@ class Node:
     indent = "  "
 
     def __str__(self, indent=""):
-        out = []
-        for _ in range(self.blanks):
-            out.append("")
+        out = ["" for _ in range(self.blanks)]
         out.append(indent + self.data)
-        for child in self.children:
-            out.append(child.__str__(self.indent + indent))
+        out.extend(child.__str__(self.indent + indent) for child in self.children)
         return "\n".join(out)
 
 
@@ -154,11 +151,7 @@ def parse_node(source):
 
 def parse_nodes(source):
     """Parse the entire AtomicML file into nodes"""
-    nodes = []
-    for node in parse_node(source):
-        nodes.append(node)
-    return nodes
-
+    return [node for node in parse_node(source)]
 
 # ////////////////////////////////////////////////////////////////
 # AtomicStyle
@@ -167,22 +160,20 @@ def parse_nodes(source):
 class AtomicStyle:
     """Recur through the node tree, match node names, call handlers"""
 
-    name_value = re.compile(r"(\S+)\s*(.*)")
-
     def __init__(self):
         self.map = {}
         self.pre = "f_"
 
-    def style(self, children, args = None, out = None):
+    def style(self, children, **kwargs):
         """Recur through children and style"""
         children = children if isinstance(children, list) else [children]
         for node in children:
-            name, value = self.name_value.match(node.data).groups()
+            name = node.data.split(None, 1)[0]
             style = getattr(self, f"{self.pre}{self.map.get(name, name)}", None)
             if style:
-                style(value, node.children, args, out)
+                style(node, **kwargs)
             else:
-                self.style(node.children, args, out)
+                self.style(node.children, **kwargs)
 
 
 # ////////////////////////////////////////////////////////////////
